@@ -8,7 +8,7 @@ use which::which;
 
 const QEMU_URL: &str = "https://github.com/AFLplusplus/qemu-libafl-bridge";
 const QEMU_DIRNAME: &str = "qemu-libafl-bridge";
-const QEMU_REVISION: &str = "0dc52ed6f3915f727aaec8648706760f278f0571";
+const QEMU_REVISION: &str = "6ae8b5bfb0bc4ac7a0b2ec463cf1000363836c0c";
 
 fn build_dep_check(tools: &[&str]) {
     for tool in tools {
@@ -138,7 +138,12 @@ pub fn build(
                 //.arg("--as-static-lib")
                 .arg("--as-shared-lib")
                 .arg(&format!("--target-list={cpu_target}-{target_suffix}"))
-                .args(["--disable-bsd-user", "--disable-fdt", "--disable-system"]);
+                .args([
+                    "--disable-bsd-user",
+                    "--disable-fdt",
+                    "--disable-system",
+                    "--disable-capstone",
+                ]);
             if cfg!(feature = "debug_assertions") {
                 cmd.arg("--enable-debug");
             }
@@ -165,6 +170,7 @@ pub fn build(
                 .arg("--disable-brlapi")
                 .arg("--disable-bsd-user")
                 .arg("--disable-bzip2")
+                .arg("--disable-capstone")
                 .arg("--disable-cap-ng")
                 .arg("--disable-canokey")
                 .arg("--disable-cloop")
@@ -231,6 +237,7 @@ pub fn build(
                 .arg("--disable-slirp-smbd")
                 .arg("--disable-smartcard")
                 .arg("--disable-snappy")
+                .arg("--disable-sndio")
                 .arg("--disable-sparse")
                 .arg("--disable-spice")
                 .arg("--disable-spice-protocol")
@@ -259,9 +266,7 @@ pub fn build(
                 .arg("--disable-xen")
                 .arg("--disable-xen-pci-passthrough")
                 .arg("--disable-xkbcommon")
-                .arg("--disable-zstd")
-                .arg("--disable-capstone")
-                .arg("--disable-sndio");
+                .arg("--disable-zstd");
             if cfg!(feature = "debug_assertions") {
                 cmd.arg("--enable-debug");
             }
