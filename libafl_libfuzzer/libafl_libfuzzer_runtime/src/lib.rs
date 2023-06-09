@@ -13,8 +13,10 @@ mod fuzz;
 #[cfg(feature = "merge")]
 mod merge;
 mod misc;
+mod observers;
 mod options;
 mod report;
+mod tmin;
 
 mod harness_wrap {
     #![allow(non_snake_case)]
@@ -102,8 +104,9 @@ macro_rules! fuzz_with {
         use std::{env::temp_dir, fs::create_dir, path::PathBuf};
 
         use crate::{BACKTRACE, CustomMutationStatus};
-        use crate::feedbacks::{LibfuzzerCrashCauseFeedback, LibfuzzerKeepFeedback};
+        use crate::feedbacks::{LibfuzzerCrashCauseFeedback, LibfuzzerKeepFeedback, ShrinkMapFeedback};
         use crate::misc::should_use_grimoire;
+        use crate::observers::SizeEdgeMapObserver;
 
         let edge_maker = &$edge_maker;
 
@@ -113,6 +116,7 @@ macro_rules! fuzz_with {
             let grimoire = grimoire_metadata.should();
 
             let edges_observer = edge_maker();
+            let size_edges_observer = SizeEdgeMapObserver::new(edge_maker());
 
             let keep_observer = LibfuzzerKeepFeedback::new();
             let keep = keep_observer.keep();
@@ -135,6 +139,7 @@ macro_rules! fuzz_with {
 
             // New maximization map feedback linked to the edges observer
             let map_feedback = MaxMapFeedback::tracking(&edges_observer, true, true);
+            let shrinking_map_feedback = ShrinkMapFeedback::tracking(&size_edges_observer, false, false);
 
             // let map_eq_factory = MapEqualityFactory::new_from_observer(&edges_observer);
 
@@ -154,6 +159,7 @@ macro_rules! fuzz_with {
                 keep_observer,
                 feedback_or!(
                     map_feedback,
+                    feedback_and_fast!(ConstFeedback::new($options.shrink()), shrinking_map_feedback),
                     // Time feedback, this one does not need a feedback state
                     TimeFeedback::with_observer(&time_observer)
                 )
@@ -328,7 +334,7 @@ macro_rules! fuzz_with {
             let mut executor = TimeoutExecutor::new(
                 InProcessExecutor::new(
                     &mut harness,
-                    tuple_list!(edges_observer, time_observer, backtrace_observer, oom_observer),
+                    tuple_list!(edges_observer, size_edges_observer, time_observer, backtrace_observer, oom_observer),
                     &mut fuzzer,
                     &mut state,
                     &mut mgr,
@@ -341,7 +347,7 @@ macro_rules! fuzz_with {
                 if !$options.dirs().is_empty() {
                     // Load from disk
                     state
-                        .load_initial_inputs(&mut fuzzer, &mut executor, &mut mgr, $options.dirs())
+                        .load_initial_inputs_forced(&mut fuzzer, &mut executor, &mut mgr, $options.dirs())
                         .unwrap_or_else(|_| {
                             panic!("Failed to load initial corpus at {:?}", $options.dirs())
                         });
@@ -412,19 +418,19 @@ macro_rules! fuzz_with {
         use libafl::observers::{
             HitcountsIterableMapObserver, HitcountsMapObserver, MultiMapObserver, StdMapObserver,
         };
-        use libafl_targets::COUNTERS_MAPS;
+        use libafl_targets::{COUNTERS_MAPS, extra_counters};
 
         // Create an observation channel using the coverage map
         if unsafe { COUNTERS_MAPS.len() } == 1 {
             fuzz_with!($options, $harness, $operation, $and_then, || {
-                let edges = unsafe { core::mem::take(&mut COUNTERS_MAPS) };
+                let edges = unsafe { extra_counters() };
                 let edges_observer =
                     HitcountsMapObserver::new(StdMapObserver::from_mut_slice("edges", edges.into_iter().next().unwrap()));
                 edges_observer
             })
         } else if unsafe { COUNTERS_MAPS.len() } > 1 {
             fuzz_with!($options, $harness, $operation, $and_then, || {
-                let edges = unsafe { core::mem::take(&mut COUNTERS_MAPS) };
+                let edges = unsafe { extra_counters() };
                 let edges_observer =
                     HitcountsIterableMapObserver::new(MultiMapObserver::new("edges", edges));
                 edges_observer
@@ -454,6 +460,12 @@ extern "C" {
     fn libafl_targets_libfuzzer_init(argc: *mut c_int, argv: *mut *mut *const c_char) -> i32;
 }
 
+#[no_mangle]
+pub extern "C" fn __asan_default_options() -> *const c_char {
+    static ASAN_DEFAULT_OPTIONS: &[u8] = b"halt_on_error=1:abort_on_error=1\0";
+    return ASAN_DEFAULT_OPTIONS.as_ptr() as *const c_char;
+}
+
 #[allow(non_snake_case)]
 #[no_mangle]
 pub extern "C" fn LLVMFuzzerRunDriver(
@@ -481,7 +493,10 @@ pub extern "C" fn LLVMFuzzerRunDriver(
             .map(|cstr| cstr.to_str().unwrap()),
     )
     .unwrap();
-    if !options.dirs().is_empty() && options.dirs().iter().all(|maybe_dir| maybe_dir.is_file()) {
+    if *options.mode() != LibfuzzerMode::Tmin
+        && !options.dirs().is_empty()
+        && options.dirs().iter().all(|maybe_dir| maybe_dir.is_file())
+    {
         // we've been requested to just run some inputs. Do so.
         for input in options.dirs() {
             let input = BytesInput::from_file(input).expect(&format!(
@@ -496,7 +511,7 @@ pub extern "C" fn LLVMFuzzerRunDriver(
         LibfuzzerMode::Fuzz => fuzz::fuzz(options, harness),
         #[cfg(feature = "merge")]
         LibfuzzerMode::Merge => merge::merge(options, harness),
-        LibfuzzerMode::Tmin => unimplemented!(),
+        LibfuzzerMode::Tmin => tmin::minimize_crash(options, harness),
         LibfuzzerMode::Report => report::report(options, harness),
     };
     match res {

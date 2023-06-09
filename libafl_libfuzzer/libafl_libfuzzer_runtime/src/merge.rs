@@ -7,7 +7,7 @@ use libafl::{
         tuples::{tuple_list, Named},
         AsIter, AsMutSlice, AsSlice,
     },
-    corpus::{Corpus, CorpusMinimizer, InMemoryCorpus, OnDiskCorpus, StdCorpusMinimizer},
+    corpus::{Corpus, CorpusMinimizer, OnDiskCorpus, StdCorpusMinimizer},
     events::SimpleEventManager,
     executors::{inprocess::TimeoutInProcessForkExecutor, ExitKind},
     feedbacks::{MapFeedbackMetadata, MaxMapFeedback},
@@ -89,6 +89,17 @@ pub fn merge(
         options.dirs().first().cloned().unwrap()
     };
 
+    let crash_corpus = if let Some(prefix) = options.artifact_prefix() {
+        OnDiskCorpus::with_meta_format_and_prefix(
+            prefix.dir(),
+            None,
+            prefix.filename_prefix().clone(),
+        )
+        .unwrap()
+    } else {
+        OnDiskCorpus::no_meta(std::env::current_dir().unwrap()).unwrap()
+    };
+
     let mut shmem_provider = StdShMemProvider::new()?;
 
     let edges = unsafe { core::mem::take(&mut COUNTERS_MAPS) };
@@ -120,7 +131,7 @@ pub fn merge(
     let mut state = StdState::new(
         rand,
         OnDiskCorpus::new(corpus_dir.clone()).unwrap(),
-        InMemoryCorpus::new(),
+        crash_corpus,
         &mut map_feedback,
         &mut (), // no objectives
     )?;
@@ -137,9 +148,13 @@ pub fn merge(
         let target = input.target_bytes();
         let buf = target.as_slice();
 
-        harness(buf.as_ptr(), buf.len());
-
-        ExitKind::Ok
+        let result = unsafe {
+            crate::libafl_libfuzzer_test_one_input(Some(*harness), buf.as_ptr(), buf.len())
+        };
+        match result {
+            -2 => ExitKind::Crash,
+            _ => ExitKind::Ok,
+        }
     };
 
     let mut executor = TimeoutInProcessForkExecutor::new(

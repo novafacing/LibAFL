@@ -106,7 +106,9 @@ pub struct LibfuzzerOptions {
     rss_limit: usize,
     malloc_limit: usize,
     dedup: bool,
+    shrink: bool,
     tui: bool,
+    runs: usize,
     close_fd_mask: u8,
     unknown: Vec<String>,
 }
@@ -157,6 +159,10 @@ impl LibfuzzerOptions {
         self.dict.as_ref()
     }
 
+    pub fn dirs_mut(&mut self) -> &mut Vec<PathBuf> {
+        &mut self.dirs
+    }
+
     pub fn dirs(&self) -> &[PathBuf] {
         &self.dirs
     }
@@ -185,8 +191,16 @@ impl LibfuzzerOptions {
         self.dedup
     }
 
+    pub fn shrink(&self) -> bool {
+        self.shrink
+    }
+
     pub fn tui(&self) -> bool {
         self.tui
+    }
+
+    pub fn runs(&self) -> usize {
+        self.runs
     }
 
     pub fn close_fd_mask(&self) -> u8 {
@@ -214,7 +228,9 @@ struct LibfuzzerOptionsBuilder<'a> {
     malloc_limit: Option<usize>,
     ignore_remaining: bool,
     dedup: bool,
+    shrink: bool,
     tui: bool,
+    runs: usize,
     close_fd_mask: u8,
     unknown: Vec<&'a str>,
 }
@@ -294,7 +310,9 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                             self.ignore_remaining = parse_or_bail!(name, value, u64) > 0
                         }
                         "dedup" => self.dedup = parse_or_bail!(name, value, u64) > 0,
+                        "shrink" => self.shrink = parse_or_bail!(name, value, u64) > 0,
                         "tui" => self.tui = parse_or_bail!(name, value, u64) > 0,
+                        "runs" => self.runs = parse_or_bail!(name, value, usize),
                         "close_fd_mask" => self.close_fd_mask = parse_or_bail!(name, value, u8),
                         _ => {
                             eprintln!("warning: unrecognised flag {name}");
@@ -333,7 +351,9 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                 value => value,
             },
             dedup: self.dedup,
+            shrink: self.shrink,
             tui: self.tui,
+            runs: self.runs,
             close_fd_mask: self.close_fd_mask,
             unknown: self.unknown.into_iter().map(|s| s.to_string()).collect(),
         })
