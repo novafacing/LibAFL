@@ -10,12 +10,12 @@ use crate::options::{LibfuzzerMode, LibfuzzerOptions};
 
 mod feedbacks;
 mod fuzz;
-#[cfg(feature = "merge")]
 mod merge;
 mod misc;
 mod observers;
 mod options;
 mod report;
+mod schedulers;
 mod tmin;
 
 mod harness_wrap {
@@ -106,7 +106,7 @@ macro_rules! fuzz_with {
         use crate::{BACKTRACE, CustomMutationStatus};
         use crate::feedbacks::{LibfuzzerCrashCauseFeedback, LibfuzzerKeepFeedback, ShrinkMapFeedback};
         use crate::misc::should_use_grimoire;
-        use crate::observers::SizeEdgeMapObserver;
+        use crate::observers::{MappedEdgeMapObserver, SizeValueObserver};
 
         let edge_maker = &$edge_maker;
 
@@ -116,7 +116,7 @@ macro_rules! fuzz_with {
             let grimoire = grimoire_metadata.should();
 
             let edges_observer = edge_maker();
-            let size_edges_observer = SizeEdgeMapObserver::new(edge_maker());
+            let size_edges_observer = MappedEdgeMapObserver::new(edge_maker(), SizeValueObserver::default());
 
             let keep_observer = LibfuzzerKeepFeedback::new();
             let keep = keep_observer.keep();
@@ -141,14 +141,11 @@ macro_rules! fuzz_with {
             let map_feedback = MaxMapFeedback::tracking(&edges_observer, true, true);
             let shrinking_map_feedback = ShrinkMapFeedback::tracking(&size_edges_observer, false, false);
 
-            // let map_eq_factory = MapEqualityFactory::new_from_observer(&edges_observer);
-
             // Set up a generalization stage for grimoire
             let generalization = GeneralizationStage::new(&edges_observer);
             let generalization = IfStage::new(|_, _, _, _, _| Ok(grimoire.into()), (generalization, ()));
 
             let calibration = CalibrationStage::new(&map_feedback);
-            // let calibration2 = CalibrationStage::new(&map_feedback);
 
             // Feedback to rate the interestingness of an input
             // This one is composed by two Feedbacks in OR
@@ -194,10 +191,11 @@ macro_rules! fuzz_with {
             };
 
             let crash_corpus = if let Some(prefix) = $options.artifact_prefix() {
-                OnDiskCorpus::with_meta_format_and_prefix(prefix.dir(), None, prefix.filename_prefix().clone())
+                OnDiskCorpus::with_meta_format_and_prefix(prefix.dir(), None, prefix.filename_prefix().clone(), false)
                     .unwrap()
             } else {
-                OnDiskCorpus::no_meta(std::env::current_dir().unwrap()).unwrap()
+                OnDiskCorpus::with_meta_format_and_prefix(&std::env::current_dir().unwrap(), None, None, false)
+                    .unwrap()
             };
 
             // If not restarting, create a State from scratch
@@ -206,7 +204,7 @@ macro_rules! fuzz_with {
                     // RNG
                     StdRand::with_seed(current_nanos()),
                     // Corpus that will be evolved, we keep it in memory for performance
-                    CachedOnDiskCorpus::new(corpus_dir.clone(), 4096).unwrap(),
+                    CachedOnDiskCorpus::with_meta_format_and_prefix(corpus_dir.clone(), 4096, None, None, true).unwrap(),
                     // Corpus in which we store solutions (crashes in this example),
                     // on disk so the user can get them after stopping the fuzzer
                     crash_corpus,
@@ -348,8 +346,8 @@ macro_rules! fuzz_with {
                     // Load from disk
                     state
                         .load_initial_inputs_forced(&mut fuzzer, &mut executor, &mut mgr, $options.dirs())
-                        .unwrap_or_else(|_| {
-                            panic!("Failed to load initial corpus at {:?}", $options.dirs())
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to load initial corpus at {:?}: {}", $options.dirs(), e)
                         });
                     println!("We imported {} inputs from disk.", state.corpus().count());
                 }
@@ -374,27 +372,18 @@ macro_rules! fuzz_with {
                 }
             }
 
-            // we don't support shrink as of now... it would require duplicating the mutators above
-            // let minimizer = StdScheduledMutator::new(havoc_mutations());
-            // let tmin = StdTMinMutationalStage::new(
-            //     minimizer,
-            //     map_eq_factory,
-            //     1 << 8
-            // );
-            // let tmin = IfStage::new(|_| mutator_status.std_mutational.into(), tmin);
 
             // Setup a tracing stage in which we log comparisons
-            let tracing = TracingStage::new(InProcessExecutor::new(
+            let tracing = IfStage::new(|_, _, _, _, _| Ok(!$options.skip_tracing()), (TracingStage::new(InProcessExecutor::new(
                 &mut tracing_harness,
                 tuple_list!(cmplog_observer),
                 &mut fuzzer,
                 &mut state,
                 &mut mgr,
-            )?);
+            )?), ()));
 
             // The order of the stages matter!
             let mut stages = tuple_list!(
-                // tmin,
                 calibration,
                 generalization,
                 tracing,
@@ -487,6 +476,11 @@ pub extern "C" fn LLVMFuzzerRunDriver(
             .map(|cstr| cstr.to_str().unwrap()),
     )
     .unwrap();
+
+    if !options.unknown().is_empty() {
+        println!("Unrecognised options: {:?}", options.unknown());
+    }
+
     if *options.mode() != LibfuzzerMode::Tmin
         && !options.dirs().is_empty()
         && options.dirs().iter().all(|maybe_dir| maybe_dir.is_file())
@@ -503,7 +497,6 @@ pub extern "C" fn LLVMFuzzerRunDriver(
     }
     let res = match options.mode() {
         LibfuzzerMode::Fuzz => fuzz::fuzz(options, harness),
-        #[cfg(feature = "merge")]
         LibfuzzerMode::Merge => merge::merge(options, harness),
         LibfuzzerMode::Tmin => tmin::minimize_crash(options, harness),
         LibfuzzerMode::Report => report::report(options, harness),

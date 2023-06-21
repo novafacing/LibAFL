@@ -228,6 +228,7 @@ where
                 observers_buf: _,
                 time,
                 executions,
+                file_path: _,
                 forward_id,
             } => {
                 let id = if let Some(id) = *forward_id {
@@ -464,6 +465,7 @@ where
                 observers_buf,
                 time: _,
                 executions: _,
+                file_path,
                 forward_id,
             } => {
                 log::info!("Received new Testcase from {client_id:?} ({client_config:?}, forward {forward_id:?})");
@@ -1291,6 +1293,7 @@ where
                 observers_buf: _, // Useless as we are converting between types
                 time: _,
                 executions: _,
+                file_path,
                 forward_id,
             } => {
                 log::info!("Received new Testcase to convert from {_client_id:?} (forward {forward_id:?}, forward {forward_id:?})");
@@ -1412,6 +1415,7 @@ where
                 observers_buf,
                 time,
                 executions,
+                file_path,
                 forward_id,
             } => Event::NewTestcase {
                 input: self.converter.as_mut().unwrap().convert(input)?,
@@ -1421,6 +1425,7 @@ where
                 observers_buf,
                 time,
                 executions,
+                file_path,
                 forward_id,
             },
             Event::CustomBuf { buf, tag } => Event::CustomBuf { buf, tag },

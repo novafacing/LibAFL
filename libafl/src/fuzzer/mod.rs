@@ -335,9 +335,9 @@ where
     /// Evaluate if a set of observation channels has an interesting state
     fn process_execution<EM>(
         &mut self,
-        state: &mut CS::State,
+        state: &mut Self::State,
         manager: &mut EM,
-        input: <CS::State as UsesInput>::Input,
+        input: <Self::State as UsesInput>::Input,
         observers: &OT,
         exit_kind: &ExitKind,
         send_events: bool,
@@ -399,6 +399,13 @@ where
                     } else {
                         Some(manager.serialize_observers::<OT>(observers)?)
                     };
+                    let file_path = state
+                        .corpus()
+                        .get(idx)
+                        .unwrap()
+                        .borrow()
+                        .file_path()
+                        .clone();
                     manager.fire(
                         state,
                         Event::NewTestcase {
@@ -409,6 +416,7 @@ where
                             client_config: manager.configuration(),
                             time: current_time(),
                             executions: *state.executions(),
+                            file_path,
                             forward_id: None,
                         },
                     )?;
@@ -486,10 +494,10 @@ where
     #[inline]
     fn evaluate_input_events(
         &mut self,
-        state: &mut CS::State,
+        state: &mut Self::State,
         executor: &mut E,
         manager: &mut EM,
-        input: <CS::State as UsesInput>::Input,
+        input: <Self::State as UsesInput>::Input,
         send_events: bool,
     ) -> Result<(ExecuteInputResult, Option<CorpusId>), Error> {
         self.evaluate_input_with_observers(state, executor, manager, input, send_events)
@@ -498,10 +506,10 @@ where
     /// Adds an input, even if it's not considered `interesting` by any of the executors
     fn add_input(
         &mut self,
-        state: &mut CS::State,
+        state: &mut Self::State,
         executor: &mut E,
         manager: &mut EM,
-        input: <CS::State as UsesInput>::Input,
+        input: <Self::State as UsesInput>::Input,
     ) -> Result<CorpusId, Error> {
         let exit_kind = self.execute_input(state, executor, manager, &input)?;
         let observers = executor.observers();
@@ -543,6 +551,13 @@ where
         } else {
             Some(manager.serialize_observers::<OT>(observers)?)
         };
+        let file_path = state
+            .corpus()
+            .get(idx)
+            .unwrap()
+            .borrow()
+            .file_path()
+            .clone();
         manager.fire(
             state,
             Event::NewTestcase {
@@ -553,6 +568,7 @@ where
                 client_config: manager.configuration(),
                 time: current_time(),
                 executions: *state.executions(),
+                file_path,
                 forward_id: None,
             },
         )?;

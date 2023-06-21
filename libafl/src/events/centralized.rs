@@ -66,6 +66,7 @@ where
                     observers_buf: _,
                     time: _,
                     executions: _,
+                    file_path: _,
                     forward_id,
                 } => {
                     *forward_id = Some(ClientId(self.inner.mgr_id().0 as u32));
@@ -162,6 +163,7 @@ where
                             observers_buf,
                             time,
                             executions,
+                            file_path,
                             forward_id,
                         } => {
                             log::info!(
@@ -190,6 +192,7 @@ where
                                         client_config,
                                         time,
                                         executions,
+                                        file_path,
                                         forward_id,
                                     },
                                 )?;

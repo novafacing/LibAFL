@@ -280,6 +280,7 @@ where
                         client_config: EventConfig::AlwaysUnique,
                         time: current_time(),
                         executions: 0,
+                        file_path: None,
                         forward_id: None,
                     },
                 )?;
