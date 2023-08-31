@@ -79,6 +79,10 @@ use std::ffi::{c_char, c_int};
 
 pub use libfuzzer_sys::*;
 
+#[cfg(all(feature = "embed-runtime", target_family = "unix"))]
+pub const LIBAFL_LIBFUZZER_RUNTIME_LIBRARY: &'static [u8] =
+    include_bytes!(env!("LIBAFL_LIBFUZZER_RUNTIME_PATH"));
+
 extern "C" {
     /// `LLVMFuzzerRunDriver` allows for harnesses which specify their own main. See: <https://llvm.org/docs/LibFuzzer.html#using-libfuzzer-as-a-library>
     ///
@@ -89,4 +93,19 @@ extern "C" {
         argv: *mut *mut *const c_char,
         harness_fn: Option<extern "C" fn(*const u8, usize) -> c_int>,
     ) -> c_int;
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "embed-runtime")]
+    #[test]
+    fn test_embed_runtime_sized() {
+        use crate::LIBAFL_LIBFUZZER_RUNTIME_LIBRARY;
+
+        assert_ne!(
+            LIBAFL_LIBFUZZER_RUNTIME_LIBRARY.len(),
+            0,
+            "Runtime library empty"
+        );
+    }
 }
