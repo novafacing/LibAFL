@@ -9,7 +9,13 @@ use std::{
     vec::Vec,
 };
 
-use crate::{CompilerWrapper, Error, ToolWrapper, LIB_EXT, LIB_PREFIX};
+use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    args::LibAFLCCArgs, configuration::CCWrapperConfiguration, CompilerWrapper, Error, ToolWrapper,
+    LIB_EXT, LIB_PREFIX,
+};
 
 /// The `OUT_DIR` for `LLVM` compiler passes
 pub const OUT_DIR: &str = env!("OUT_DIR");
@@ -28,8 +34,9 @@ include!(concat!(env!("OUT_DIR"), "/clang_constants.rs"));
 
 /// The supported LLVM passes
 #[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LLVMPasses {
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum LLVMPass {
     //CmpLogIns,
     /// The CmpLog pass
     CmpLogRtn,
@@ -43,21 +50,21 @@ pub enum LLVMPasses {
     DumpCfg,
 }
 
-impl LLVMPasses {
+impl LLVMPass {
     /// Gets the path of the LLVM pass
     #[must_use]
     pub fn path(&self) -> PathBuf {
         match self {
-            LLVMPasses::CmpLogRtn => PathBuf::from(env!("OUT_DIR"))
+            LLVMPass::CmpLogRtn => PathBuf::from(env!("OUT_DIR"))
                 .join(format!("cmplog-routines-pass.{}", dll_extension())),
-            LLVMPasses::AFLCoverage => PathBuf::from(env!("OUT_DIR"))
+            LLVMPass::AFLCoverage => PathBuf::from(env!("OUT_DIR"))
                 .join(format!("afl-coverage-pass.{}", dll_extension())),
-            LLVMPasses::AutoTokens => {
+            LLVMPass::AutoTokens => {
                 PathBuf::from(env!("OUT_DIR")).join(format!("autotokens-pass.{}", dll_extension()))
             }
-            LLVMPasses::CoverageAccounting => PathBuf::from(env!("OUT_DIR"))
+            LLVMPass::CoverageAccounting => PathBuf::from(env!("OUT_DIR"))
                 .join(format!("coverage-accounting-pass.{}", dll_extension())),
-            LLVMPasses::DumpCfg => {
+            LLVMPass::DumpCfg => {
                 PathBuf::from(env!("OUT_DIR")).join(format!("dump-cfg-pass.{}", dll_extension()))
             }
         }
@@ -91,7 +98,7 @@ pub struct ClangWrapper {
     base_args: Vec<String>,
     cc_args: Vec<String>,
     link_args: Vec<String>,
-    passes: Vec<LLVMPasses>,
+    passes: Vec<LLVMPass>,
     passes_args: Vec<String>,
     passes_linking_args: Vec<String>,
 }
@@ -589,7 +596,7 @@ impl ClangWrapper {
     }
 
     /// Add LLVM pass
-    pub fn add_pass(&mut self, pass: LLVMPasses) -> &'_ mut Self {
+    pub fn add_pass(&mut self, pass: LLVMPass) -> &'_ mut Self {
         self.passes.push(pass);
         self
     }
@@ -629,6 +636,37 @@ impl ClangWrapper {
         self.use_new_pm = value;
         self
     }
+}
+
+#[derive(Builder, Debug)]
+/// Wrapper for
+pub struct CCWrapper {
+    config: CCWrapperConfiguration,
+    libafl_args: LibAFLCCArgs,
+    #[builder(default)]
+    tool_args: Vec<String>,
+    #[builder(default)]
+    cpp: bool,
+    #[builder(default, setter(custom))]
+    suppress_linking: bool,
+}
+
+impl CCWrapperBuilder {
+    fn suppress_linking(&mut self, _: bool) {
+        let libafl_args = self.libafl_args.as_ref().unwrap();
+        let tool_args = self.tool_args.as_ref().unwrap();
+        self.suppress_linking = Some(
+            (libafl_args.libafl_no_link()
+                || tool_args.contains(&"-fsanitize=fuzzer-no-link".to_string()))
+                && !libafl_args.libafl()
+                && !tool_args.contains(&"-fsanitize=fuzzer".to_string()),
+        );
+    }
+}
+
+impl CCWrapper {
+    const DEFAULT_CC: &str = "clang";
+    const DEFAULT_CXX: &str = "clang++";
 }
 
 #[cfg(test)]

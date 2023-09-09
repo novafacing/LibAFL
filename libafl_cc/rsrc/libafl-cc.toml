@@ -1,0 +1,8 @@
+[tool-configuration.default.cc]
+args = []
+
+[tool-configuration.default.ar]
+args = []
+
+[tool-configuration.default.libtool]
+args = []

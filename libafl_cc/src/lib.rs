@@ -61,13 +61,15 @@
 use std::{convert::Into, path::Path, process::Command, string::String, vec::Vec};
 
 pub mod ar;
+pub mod args;
 pub use ar::ArWrapper;
 pub mod cfg;
 pub use cfg::{CfgEdge, ControlFlowGraph, EntryBasicBlockInfo, HasWeight};
 pub mod clang;
-pub use clang::{ClangWrapper, LLVMPasses};
+pub use clang::{ClangWrapper, LLVMPass};
 pub mod libtool;
 pub use libtool::LibtoolWrapper;
+pub mod configuration;
 
 /// `LibAFL` CC Error Type
 #[derive(Debug)]
