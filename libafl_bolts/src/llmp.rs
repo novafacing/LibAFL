@@ -105,15 +105,9 @@ use crate::{
     ClientId, Error,
 };
 
+/// The timeout after which a client will be considered stale, and removed.
 #[cfg(feature = "std")]
-/// An environment variable of this name, set to a number in seconds, overrides
-/// [`DEFAULT_CLIENT_TIMEOUT`] for the broker's stale client detection.
-const _LLMP_CLIENT_TIMEOUT_ENV_STR: &str = "LLMP_CLIENT_TIMEOUT";
-
-/// The timeout after which a client will be considered stale, and removed. Defaults to 5 minutes.
-/// If LLMP_CLIENT_TIMEOUT is set, it will be used instead.
-#[cfg(feature = "std")]
-const DEFAULT_CLIENT_TIMEOUT: u64 = 60 * 5;
+const CLIENT_TIMEOUT: Duration = Duration::from_secs(60 * 5);
 
 /// The max number of pages a [`client`] may have mapped that were not yet read by the [`broker`]
 /// Usually, this value should not exceed `1`, else the broker cannot keep up with the amount of incoming messages.
@@ -1934,8 +1928,6 @@ where
     clients_to_remove: Vec<usize>,
     /// The ShMemProvider to use
     shmem_provider: SP,
-    /// The duration after which a non-communicative client is considered dead.
-    client_timeout: Duration,
 }
 
 /// A signal handler for the [`LlmpBroker`].
@@ -1995,13 +1987,6 @@ where
             listeners: vec![],
             exit_cleanly_after: None,
             num_clients_total: 0,
-            #[cfg(feature = "std")]
-            client_timeout: Duration::from_secs(
-                env::var(_LLMP_CLIENT_TIMEOUT_ENV_STR)
-                    .ok()
-                    .and_then(|env| env.parse().ok())
-                    .unwrap_or(DEFAULT_CLIENT_TIMEOUT),
-            ),
         })
     }
 
@@ -2196,7 +2181,7 @@ where
                     if !has_messages && !self.listeners.iter().any(|&x| x == client_id) {
                         let last_msg_time = self.llmp_clients[i].last_msg_time;
                         if last_msg_time < current_time
-                            && current_time - last_msg_time > self.client_timeout
+                            && current_time - last_msg_time > CLIENT_TIMEOUT
                         {
                             self.clients_to_remove.push(i);
                             #[cfg(feature = "llmp_debug")]
