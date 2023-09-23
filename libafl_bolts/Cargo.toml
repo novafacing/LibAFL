@@ -120,6 +120,9 @@ serial_test = { version = "2", optional = true, default-features = false, featur
 # Document all features of this crate (for `cargo doc`)
 document-features = { version = "0.2", optional = true }
 
+# Implement the builder pattern at compile-time
+typed-builder = { git = "https://github.com/novafacing/rust-typed-builder.git", branch = "mutable-assignments" }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2" # For (*nix) libc
 uds = { version = "0.4", optional = true, default-features = false }
