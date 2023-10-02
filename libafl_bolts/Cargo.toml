@@ -121,7 +121,7 @@ serial_test = { version = "2", optional = true, default-features = false, featur
 document-features = { version = "0.2", optional = true }
 
 # Implement the builder pattern at compile-time
-typed-builder = { git = "https://github.com/novafacing/rust-typed-builder.git", branch = "mutable-assignments" }
+typed-builder = { git = "https://github.com/idanarye/rust-typed-builder" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2" # For (*nix) libc
