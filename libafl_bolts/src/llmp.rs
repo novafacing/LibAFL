@@ -719,7 +719,10 @@ where
                 // We are the client :)
                 log::info!("We're the client (internal port already bound by broker, {e:#?})");
                 Ok(LlmpConnection::IsClient {
-                    client: LlmpClient::create_attach_to_tcp(shmem_provider, port)?,
+                    client: LlmpClient::builder()
+                        .shmem_provider(shmem_provider)
+                        .port(port)
+                        .build(),
                 })
             }
             Err(e) => {
@@ -741,7 +744,10 @@ where
     #[cfg(feature = "std")]
     pub fn client_on_port(shmem_provider: SP, port: u16) -> Result<Self, Error> {
         Ok(LlmpConnection::IsClient {
-            client: LlmpClient::create_attach_to_tcp(shmem_provider, port)?,
+            client: LlmpClient::builder()
+                .shmem_provider(shmem_provider)
+                .port(port)
+                .build()
         })
     }
 
@@ -759,7 +765,10 @@ where
         description: &LlmpClientDescription,
     ) -> Result<LlmpConnection<SP>, Error> {
         Ok(LlmpConnection::IsClient {
-            client: LlmpClient::existing_client_from_description(shmem_provider, description)?,
+            client: LlmpClient::builder()
+                .shmem_provider(shmem_provider)
+                .source_description(*description)
+                .build(),
         })
     }
 
@@ -2989,184 +2998,246 @@ pub struct LlmpClientDescription {
 
 #[derive(TypedBuilder, Debug)]
 /// Client side of LLMP
+/// 
+/// Can be created from:
+/// - A client port
+/// - An environment variable
+/// - An existing shared memory
+/// - An existing description
 pub struct LlmpClient<SP>
 where
     SP: ShMemProvider,
 {
+    #[allow(unused)]
+    #[builder(mutable_during_default_resolution)]
+    shmem_provider: SP,
+
+    #[allow(unused)]
+    #[builder(default, setter(strip_option))]
+    source_id: Option<ClientId>,
+    #[allow(unused)]
+    #[builder(default, setter(strip_option))]
+    source_env: Option<String>,
+    #[allow(unused)]
+    #[builder(default, setter(strip_option))]
+    source_shmem: Option<SP::ShMem>,
+    #[allow(unused)]
+    #[builder(default, setter(strip_option))]
+    source_description: Option<LlmpClientDescription>,
+    #[allow(unused)]
+    #[builder(default)]
+    source_last_msg_recvd_offset: Option<Option<u64>>,
+    #[allow(unused)]
+    #[builder(default, setter(strip_option))]
+    port: Option<u16>,
+
+    #[allow(unused)]
+    #[builder(
+        default = {
+            if let Some(port) = port {
+                let mut stream = match TcpStream::connect((_LLMP_CONNECT_ADDR, port)) {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => {
+                                //connection refused. loop till the broker is up
+                                loop {
+                                    match TcpStream::connect((_LLMP_CONNECT_ADDR, port)) {
+                                        Ok(stream) => break stream,
+                                        Err(_) => {
+                                            log::info!("Connection Refused.. Retrying");
+                                        }
+                                    }
+                                }
+                            }
+                            _ => panic!("{}", e.to_string()),
+                        }
+                    }
+                };
+
+                log::info!("Connected to port {port}");
+
+                let TcpResponse::BrokerConnectHello {
+                    broker_shmem_description,
+                    hostname: _,
+                } = recv_tcp_msg(&mut stream)
+                        .unwrap_or_else(|e| panic!("Unable to receive TCP message from stream: {e}"))
+                        .try_into()
+                        .unwrap_or_else(|e| panic!("TCP response was an incorrect type: {e}"))
+                else {
+                   panic!("Received unexpected Broker Hello");
+                };
+
+                let map = LlmpSharedMap::existing(
+                    shmem_provider.shmem_from_description(broker_shmem_description)
+                        .unwrap_or_else(|e| {
+                            panic!("Unable to get shared memory from description: {e}")
+                        })
+                );
+
+                let mut sender = LlmpSender::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .build();
+
+                let receiver = LlmpReceiver::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .current_recv_shmem(map)
+                    .build();
+
+                let client_hello_req = TcpRequest::LocalClientHello {
+                    shmem_description: sender.out_shmems.first()
+                        .unwrap_or_else(|| panic!("No shared memory in sender"))
+                        .shmem
+                        .description()
+
+                };
+
+                send_tcp_msg(&mut stream, &client_hello_req)
+                    .unwrap_or_else(|e| panic!("Failed to send local client hello: {e}"));
+
+                let TcpResponse::LocalClientAccepted { client_id } = recv_tcp_msg(&mut stream)
+                    .unwrap_or_else(|e| panic!("Failed to receive response: {e}"))
+                    .try_into()
+                    .unwrap_or_else(|e| panic!("Failed to convert response: {e}")) else {
+                        panic!("Failed");
+                    };
+
+                sender.id = client_id;
+
+                unsafe { 
+                    (
+                        *sender.out_shmems.first_mut()
+                            .unwrap_or_else(|| {
+                                panic!("No shared memory in sender")
+                            })
+                            .page_mut()
+                    )
+                    .sender_id = client_id; 
+                }
+
+                Some((Some(sender), Some(receiver)))
+            } else {
+                None
+            }
+        },
+        mutable_during_default_resolution,
+        setter(skip)
+    )]
+    connected: Option<(Option<LlmpSender<SP>>, Option<LlmpReceiver<SP>>)>,
+
+
+    #[builder(
+        default = {
+            // port: source_shmem_provider, port
+            // env: source_shmem_provider, source_env
+            // shmem: source_shmem_provider, source_shmem, source_last_msg_recvd_offset
+            // default: source_shmem_provider, source_shmem, source_id
+            // description: source_shmem_provider, source_description
+            // p2p: source_shmem_provider, source_id
+            if let Some(ref mut connected) = connected {
+                connected.0.take().unwrap_or_else(|| panic!("No connected sender"))
+            } else if let Some(ref source_env) = source_env {
+                LlmpSender::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .source_env(format!("{source_env}_SENDER"))
+                    .build()
+            } else if let Some(ref source_shmem) = source_shmem {
+                if let Some(ref source_last_msg_recvd_offset) = source_last_msg_recvd_offset {
+                    LlmpSender::builder()
+                        .shmem_provider(shmem_provider.clone())
+                        .source_shmem(source_shmem.clone())
+                        .source_last_msg_sent_offset(*source_last_msg_recvd_offset)
+                        .build()
+                } else if let Some(ref source_id) = source_id {
+                    LlmpSender::builder()
+                        .shmem_provider(shmem_provider.clone())
+                        .id(*source_id)
+                        .source_shmem(source_shmem.clone())
+                        .build()
+                } else {
+                    panic!("Source shared memory provided but no last offset or id provided");
+                }
+            } else if let Some(ref source_description) = source_description {
+                LlmpSender::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .source_description(source_description.sender)
+                    .build()
+            } else if let Some(ref source_id) = source_id {
+                LlmpSender::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .id(*source_id)
+                    .build()
+            } else {
+                panic!("No valid configuration found");
+            }
+        }
+    )]
     /// Outgoing channel to the broker
     sender: LlmpSender<SP>,
+    #[builder(
+        default = {
+            // port: source_shmem_provider, port
+            // env: source_shmem_provider, source_env
+            // shmem: source_shmem_provider, source_shmem, source_last_msg_recvd_offset
+            // default: source_shmem_provider, source_shmem, source_id
+            // description: source_shmem_provider, source_description
+            // p2p: source_shmem_provider, source_id
+
+            if let Some(ref mut connected) = connected {
+                connected.1.take().unwrap_or_else(|| panic!("No connected receiver"))
+            } else if let Some(ref source_env) = source_env {
+                    LlmpReceiver::builder()
+                        .shmem_provider(shmem_provider.clone())
+                        .source_env(format!("{source_env}_RECEIVER"))
+                        .build()
+            } else if let Some(ref source_shmem) = source_shmem {
+                if let Some(ref source_last_msg_recvd_offset) = source_last_msg_recvd_offset {
+                    LlmpReceiver::builder()
+                        .shmem_provider(shmem_provider.clone())
+                        .source_shmem(source_shmem.clone())
+                        .source_last_msg_recvd_offset(*source_last_msg_recvd_offset)
+                        .build()
+                } else if let  Some(ref source_id) = source_id {
+                    LlmpReceiver::builder()
+                        .shmem_provider(shmem_provider.clone())
+                        .source_shmem(source_shmem.clone())
+                        .id(*source_id)
+                        .build()
+                } else {
+                    panic!("Source shared memory provided, but no last offset or id provided");
+                }
+            } else if let Some(ref source_description) = source_description {
+                LlmpReceiver::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .source_description(source_description.receiver)
+                    .build()
+            } else if let Some(ref source_id) = source_id {
+                LlmpReceiver::builder()
+                    .shmem_provider(shmem_provider.clone())
+                    .id(*source_id)
+                    .build()
+            } else {
+                panic!("No valid configuration found");
+            }
+
+        }
+    )]
     /// Incoming (broker) broadcast map
     receiver: LlmpReceiver<SP>,
 }
 
 /// `n` clients connect to a broker. They share an outgoing map with the broker,
 /// and get incoming messages from the shared broker bus
+/// 
+/// Clients can be initialized from:
+/// 
+/// - An environment variable
+/// - A shmem description
+/// - An existing shared memory
 impl<SP> LlmpClient<SP>
 where
     SP: ShMemProvider,
 {
-    /// Reattach to a vacant client map.
-    /// It is essential, that the broker (or someone else) kept a pointer to the `out_shmem`
-    /// else reattach will get a new, empty page, from the OS, or fail
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn on_existing_shmem(
-        shmem_provider: SP,
-        _current_out_shmem: SP::ShMem,
-        _last_msg_sent_offset: Option<u64>,
-        current_broker_shmem: SP::ShMem,
-        last_msg_recvd_offset: Option<u64>,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            receiver: LlmpReceiver::builder()
-                .shmem_provider(shmem_provider.clone())
-                .source_shmem(current_broker_shmem.clone())
-                .source_last_msg_recvd_offset(last_msg_recvd_offset)
-                .build(),
-            sender: LlmpSender::builder()
-                .shmem_provider(shmem_provider)
-                .source_shmem(current_broker_shmem)
-                .source_last_msg_sent_offset(last_msg_recvd_offset)
-                .build(),
-        })
-    }
-
-    /// Recreate this client from a previous [`client.to_env()`]
-    #[cfg(feature = "std")]
-    pub fn on_existing_from_env(shmem_provider: SP, env_name: &str) -> Result<Self, Error> {
-        Ok(Self {
-            sender: LlmpSender::builder()
-                .shmem_provider(shmem_provider.clone())
-                .source_env(format!("{env_name}_SENDER"))
-                .build(),
-            receiver:  LlmpReceiver::builder()
-                .shmem_provider(shmem_provider)
-                .source_env(format!("{env_name}_RECEIVER"))
-                .build(),
-        })
-    }
-
-    /// Create an existing client from description
-    pub fn existing_client_from_description(
-        shmem_provider: SP,
-        description: &LlmpClientDescription,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            sender: LlmpSender::builder()
-                .shmem_provider(shmem_provider.clone())
-                .source_description(description.sender)
-                .build(),
-            receiver: LlmpReceiver::builder()
-                .shmem_provider(shmem_provider)
-                .source_description(description.sender)
-                .build(),
-        })
-    }
-
-    /// Creates a new [`LlmpClient`]
-    pub fn new(
-        shmem_provider: SP,
-        initial_broker_shmem: LlmpSharedMap<SP::ShMem>,
-        sender_id: ClientId,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            sender: LlmpSender::builder()
-                .id(sender_id)
-                .shmem_provider(shmem_provider.clone())
-                .build(),
-            receiver: LlmpReceiver::builder()
-                .shmem_provider(shmem_provider)
-                .current_recv_shmem(initial_broker_shmem)
-                .build()
-
-        })
-    }
-
-    /// Create a point-to-point channel instead of using a broker-client channel
-    pub fn new_p2p(shmem_provider: SP, sender_id: ClientId) -> Result<Self, Error> {
-        let sender = LlmpSender::builder()
-            .id(sender_id)
-            .shmem_provider(shmem_provider.clone())
-            .build();
-        let receiver = LlmpReceiver::builder()
-            .shmem_provider(shmem_provider)
-            .source_shmem(sender.out_shmems[0].shmem.clone())
-            .build();
-        Ok(Self { sender, receiver })
-    }
-
-    #[cfg(feature = "std")]
-    /// Creates a new [`LlmpClient`], reading the map id and len from env
-    pub fn create_using_env(mut shmem_provider: SP, env_var: &str) -> Result<Self, Error> {
-        let map = LlmpSharedMap::existing(shmem_provider.existing_from_env(env_var)?);
-        let client_id = unsafe { (*map.page()).sender_id };
-        Self::new(shmem_provider, map, client_id)
-    }
-
-    #[cfg(feature = "std")]
-    /// Create a [`LlmpClient`], getting the ID from a given port
-    pub fn create_attach_to_tcp(mut shmem_provider: SP, port: u16) -> Result<Self, Error> {
-        let mut stream = match TcpStream::connect((_LLMP_CONNECT_ADDR, port)) {
-            Ok(stream) => stream,
-            Err(e) => {
-                match e.kind() {
-                    std::io::ErrorKind::ConnectionRefused => {
-                        //connection refused. loop till the broker is up
-                        loop {
-                            match TcpStream::connect((_LLMP_CONNECT_ADDR, port)) {
-                                Ok(stream) => break stream,
-                                Err(_) => {
-                                    log::info!("Connection Refused.. Retrying");
-                                }
-                            }
-                        }
-                    }
-                    _ => return Err(Error::illegal_state(e.to_string())),
-                }
-            }
-        };
-        log::info!("Connected to port {port}");
-
-        let TcpResponse::BrokerConnectHello {
-            broker_shmem_description,
-            hostname: _,
-        } = recv_tcp_msg(&mut stream)?.try_into()?
-        else {
-            return Err(Error::illegal_state(
-                "Received unexpected Broker Hello".to_string(),
-            ));
-        };
-
-        let map = LlmpSharedMap::existing(
-            shmem_provider.shmem_from_description(broker_shmem_description)?,
-        );
-
-        // We'll set `sender_id` later
-        let mut ret = Self::new(shmem_provider, map, ClientId(0))?;
-
-        let client_hello_req = TcpRequest::LocalClientHello {
-            shmem_description: ret.sender.out_shmems.first().unwrap().shmem.description(),
-        };
-
-        send_tcp_msg(&mut stream, &client_hello_req)?;
-
-        let TcpResponse::LocalClientAccepted { client_id } =
-            recv_tcp_msg(&mut stream)?.try_into()?
-        else {
-            return Err(Error::illegal_state(
-                "Unexpected Response from Broker".to_string(),
-            ));
-        };
-
-        // Set our ID to the one the broker sent us..
-        // This is mainly so we can filter out our own msgs later.
-        ret.sender.id = client_id;
-        // Also set the sender on our initial llmp map correctly.
-        unsafe {
-            (*ret.sender.out_shmems.first_mut().unwrap().page_mut()).sender_id = client_id;
-        }
-
-        Ok(ret)
-    }
 
     /// Write the current state to env.
     /// A new client can attach to exactly the same state by calling [`LlmpClient::on_existing_shmem()`].
@@ -3319,6 +3390,7 @@ mod tests {
 
     use std::{thread::sleep, time::Duration};
 
+    use alloc::string::ToString;
     use serial_test::serial;
 
     use super::{
@@ -3366,7 +3438,10 @@ mod tests {
         }
 
         /* recreate the client from env, check if it still works */
-        client = LlmpClient::on_existing_from_env(shmem_provider, "_ENV_TEST").unwrap();
+        client = LlmpClient::builder()
+            .shmem_provider(shmem_provider)
+            .source_env("_ENV_TEST".to_string())
+            .build();
 
         client.send_buf(tag, &arr).unwrap();
 
