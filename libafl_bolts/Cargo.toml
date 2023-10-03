@@ -111,6 +111,7 @@ nix = { version = "0.26", optional = true , features = ["socket", "poll"] }
 uuid = { version = "1.4", optional = true, features = ["serde", "v4"] }
 clap = {version = "4.0", features = ["derive", "wrap_help"], optional = true} # CLI parsing, for libafl_bolts::cli / the `cli` feature
 log = "0.4.20"
+typed-builder = { git = "https://github.com/idanarye/rust-typed-builder" }
 
 pyo3 = { version = "0.18", optional = true, features = ["serde", "macros"] }
 
