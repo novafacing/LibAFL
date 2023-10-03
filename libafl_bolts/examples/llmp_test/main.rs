@@ -161,7 +161,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match mode.as_str() {
         "broker" => {
-            let mut broker = llmp::LlmpBroker::new(StdShMemProvider::new()?)?;
+            let mut broker = llmp::LlmpBroker::builder()
+                .shmem_provider(StdShMemProvider::new()?)
+                .build();
             broker.launch_tcp_listener_on(port)?;
             // Exit when we got at least _n_ nodes, and all of them quit.
             broker.set_exit_cleanly_after(NonZeroUsize::new(1_usize).unwrap());
@@ -172,7 +174,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         "b2b" => {
-            let mut broker = llmp::LlmpBroker::new(StdShMemProvider::new()?)?;
+            let mut broker = llmp::LlmpBroker::builder()
+                .shmem_provider(StdShMemProvider::new()?)
+                .build();
             broker.launch_tcp_listener_on(b2b_port)?;
             // connect back to the main broker.
             broker.connect_b2b(("127.0.0.1", port))?;
