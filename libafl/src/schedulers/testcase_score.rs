@@ -339,7 +339,9 @@ where
             weight *= 2.0;
         }
 
-        assert!(weight.is_normal());
+        if !weight.is_normal() {
+            weight = 1.0;
+        }
 
         Ok(weight)
     }
