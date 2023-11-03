@@ -30,7 +30,9 @@ where
         mgr: &mut EM,
         input: &Self::Input,
     ) -> Result<ExitKind, Error> {
-        self.executor.run_target(fuzzer, state, mgr, input)
+        let ret = self.executor.run_target(fuzzer, state, mgr, input);
+        self.executor.post_run_reset();
+        ret
     }
 }
 
@@ -51,7 +53,7 @@ where
 
 impl<E, OT> HasObservers for WithObservers<E, OT>
 where
-    E: HasObservers + Debug,
+    E: UsesState + Debug,
     OT: ObserversTuple<E::State> + Debug,
 {
     fn observers(&self) -> &OT {

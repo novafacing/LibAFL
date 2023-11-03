@@ -28,7 +28,8 @@
     clippy::missing_panics_doc,
     clippy::missing_docs_in_private_items,
     clippy::module_name_repetitions,
-    clippy::ptr_cast_constness
+    clippy::ptr_cast_constness,
+    clippy::negative_feature_names
 )]
 #![cfg_attr(not(test), warn(
     missing_debug_implementations,
@@ -139,7 +140,6 @@ use alloc::vec::Vec;
 use core::hash::BuildHasher;
 #[cfg(any(feature = "xxh3", feature = "alloc"))]
 use core::hash::Hasher;
-use core::{iter::Iterator, time};
 #[cfg(feature = "std")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -174,18 +174,23 @@ pub mod launcher {}
 #[allow(unused_imports)]
 #[macro_use]
 extern crate libafl_derive;
-#[cfg(feature = "alloc")]
-use alloc::string::{FromUtf8Error, String};
 use core::{
     array::TryFromSliceError,
     fmt::{self, Display},
+    iter::Iterator,
     num::{ParseIntError, TryFromIntError},
+    time,
 };
 #[cfg(feature = "std")]
 use std::{env::VarError, io};
 
 #[cfg(feature = "libafl_derive")]
 pub use libafl_derive::SerdeAny;
+#[cfg(feature = "alloc")]
+use {
+    alloc::string::{FromUtf8Error, String},
+    core::cell::{BorrowError, BorrowMutError},
+};
 
 /// We need fixed names for many parts of this lib.
 pub trait Named {
@@ -443,6 +448,24 @@ impl Display for Error {
     }
 }
 
+#[cfg(feature = "alloc")]
+impl From<BorrowError> for Error {
+    fn from(err: BorrowError) -> Self {
+        Self::illegal_state(format!(
+            "Couldn't borrow from a RefCell as immutable: {err:?}"
+        ))
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<BorrowMutError> for Error {
+    fn from(err: BorrowMutError) -> Self {
+        Self::illegal_state(format!(
+            "Couldn't borrow from a RefCell as mutable: {err:?}"
+        ))
+    }
+}
+
 /// Stringify the postcard serializer error
 #[cfg(feature = "alloc")]
 impl From<postcard::Error> for Error {
@@ -553,6 +576,17 @@ pub mod prelude {
 pub unsafe extern "C" fn external_current_millis() -> u64 {
     // TODO: use "real" time here
     1000
+}
+
+/// Trait to convert into an Owned type
+pub trait IntoOwned {
+    /// Returns if the current type is an owned type.
+    #[must_use]
+    fn is_owned(&self) -> bool;
+
+    /// Transfer the current type into an owned type.
+    #[must_use]
+    fn into_owned(self) -> Self;
 }
 
 /// Can be converted to a slice
@@ -725,7 +759,7 @@ pub static LIBAFL_STDERR_LOGGER: SimpleStderrLogger = SimpleStderrLogger::new();
 #[cfg(feature = "std")]
 pub static LIBAFL_STDOUT_LOGGER: SimpleStdoutLogger = SimpleStdoutLogger::new();
 
-/// A simple logger struct that logs to stderr when used with [`log::set_logger`].
+/// A simple logger struct that logs to stdout when used with [`log::set_logger`].
 #[derive(Debug)]
 #[cfg(feature = "std")]
 pub struct SimpleStdoutLogger {}
@@ -838,7 +872,7 @@ pub mod bolts_prelude {
     pub use super::staterestore::*;
     #[cfg(feature = "alloc")]
     pub use super::{anymap::*, llmp::*, ownedref::*, rands::*, serdeany::*, shmem::*, tuples::*};
-    pub use super::{cpu::*, os::*, rands::*};
+    pub use super::{cpu::*, os::*};
 }
 
 #[cfg(feature = "python")]
