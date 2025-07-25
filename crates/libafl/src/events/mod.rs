@@ -253,6 +253,18 @@ impl ExecStats {
     pub fn new(time: Duration, executions: u64) -> Self {
         Self { time, executions }
     }
+
+    /// Retrieve the time of generation of the [`Event`]
+    #[must_use]
+    pub fn time(&self) -> Duration {
+        self.time
+    }
+
+    /// Retrieve the executions of this client
+    #[must_use]
+    pub fn executions(&self) -> u64 {
+        self.executions
+    }
 }
 
 /// Event with associated stats

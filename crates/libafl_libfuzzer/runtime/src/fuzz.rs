@@ -16,7 +16,6 @@ use libafl::{
     corpus::Corpus,
     events::{EventReceiver, ProgressReporter},
     executors::ExitKind,
-    monitors::MultiMonitor,
     stages::StagesTuple,
     state::{HasCurrentStageId, HasExecutions, HasLastReportTime, HasSolutions, Stoppable},
 };
@@ -32,8 +31,11 @@ use libafl_bolts::{
 };
 
 use crate::{
-    feedbacks::LibfuzzerCrashCauseMetadata, fuzz_with, manager::LibFuzzerEventManager,
-    monitor::LibFuzzerMonitor, options::LibfuzzerOptions,
+    feedbacks::LibfuzzerCrashCauseMetadata,
+    fuzz_with,
+    manager::{LibFuzzerEventManager, LibFuzzerRestartingEventManager},
+    monitor::LibFuzzerMonitor,
+    options::LibfuzzerOptions,
 };
 
 #[cfg(unix)]
@@ -137,8 +139,6 @@ fn fuzz_single_forking<M>(
 where
     M: Monitor + Debug,
 {
-    use crate::manager::LibFuzzerRestartingEventManager;
-
     destroy_output_fds(options);
     fuzz_with!(options, harness, do_fuzz, |fuzz_single| {
         let (state, mgr): (
@@ -248,7 +248,7 @@ pub fn fuzz(
         }
 
         // Non-TUI path or when tui_monitor feature is disabled
-        let monitor = MultiMonitor::new(create_monitor_closure());
+        let monitor = LibFuzzerMonitor::new(create_monitor_closure());
 
         if forks == 1 {
             return fuzz_single_forking(options, harness, shmem_provider, monitor);

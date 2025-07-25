@@ -325,6 +325,7 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                         #[cfg(not(windows))]
                         "fork" | "jobs" => {
                             self.forks = Some(parse_or_bail!(name, value, usize));
+                            eprintln!("Running {} workers", self.forks);
                         }
                         "ignore_crashes" => {
                             self.ignore_crashes = Some(parse_or_bail!(name, value, u64) > 0);
