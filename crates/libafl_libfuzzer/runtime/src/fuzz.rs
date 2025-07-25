@@ -14,7 +14,7 @@ use libafl::monitors::tui::TuiMonitor;
 use libafl::{
     Error, Fuzzer, HasMetadata,
     corpus::Corpus,
-    events::{EventReceiver, ProgressReporter, SimpleEventManager},
+    events::{EventReceiver, ProgressReporter},
     executors::ExitKind,
     monitors::MultiMonitor,
     stages::StagesTuple,
@@ -22,7 +22,7 @@ use libafl::{
 };
 #[cfg(unix)]
 use libafl::{
-    events::{EventConfig, SimpleRestartingEventManager, launcher::Launcher},
+    events::{EventConfig, launcher::Launcher},
     monitors::Monitor,
 };
 #[cfg(unix)]
@@ -31,7 +31,10 @@ use libafl_bolts::{
     shmem::{ShMemProvider, StdShMemProvider},
 };
 
-use crate::{feedbacks::LibfuzzerCrashCauseMetadata, fuzz_with, options::LibfuzzerOptions};
+use crate::{
+    feedbacks::LibfuzzerCrashCauseMetadata, fuzz_with, manager::LibFuzzerEventManager,
+    monitor::LibFuzzerMonitor, options::LibfuzzerOptions,
+};
 
 #[cfg(unix)]
 fn destroy_output_fds(options: &LibfuzzerOptions) {
@@ -134,12 +137,14 @@ fn fuzz_single_forking<M>(
 where
     M: Monitor + Debug,
 {
+    use crate::manager::LibFuzzerRestartingEventManager;
+
     destroy_output_fds(options);
     fuzz_with!(options, harness, do_fuzz, |fuzz_single| {
         let (state, mgr): (
             Option<StdState<_, _, _, _>>,
-            SimpleRestartingEventManager<_, _, StdState<_, _, _, _>, _, _>,
-        ) = match SimpleRestartingEventManager::launch(monitor, &mut shmem_provider) {
+            LibFuzzerRestartingEventManager<_, _, StdState<_, _, _, _>, _, _>,
+        ) = match LibFuzzerRestartingEventManager::launch(monitor, &mut shmem_provider) {
             // The restarting state will spawn the same process again as child, then restarted it each time it crashes.
             Ok(res) => res,
             Err(err) => match err {
@@ -221,7 +226,7 @@ fn create_monitor_closure() -> impl Fn(&str) + Clone {
             std::mem::forget(stderr); // do not close the descriptor!
         }
         #[cfg(not(unix))]
-        eprintln!("{s}");
+        println!("{s}");
     }
 }
 
@@ -269,7 +274,7 @@ pub fn fuzz(
     destroy_output_fds(options);
 
     fuzz_with!(options, harness, do_fuzz, |fuzz_single| {
-        let mgr = SimpleEventManager::new(MultiMonitor::new(create_monitor_closure()));
+        let mgr = LibFuzzerEventManager::new(LibFuzzerMonitor::new(create_monitor_closure()));
         crate::start_fuzzing_single(fuzz_single, None, mgr)
     })
 }
