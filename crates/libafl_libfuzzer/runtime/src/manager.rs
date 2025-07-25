@@ -157,10 +157,10 @@ where
                 .unwrap_or_default()
                 > Duration::from_secs(2)
         {
-            self.report_progress(state);
+            self.report_progress(state)
+        } else {
+            Ok(())
         }
-
-        Ok(())
     }
 
     fn report_progress(&mut self, state: &mut S) -> Result<(), Error> {
@@ -170,9 +170,7 @@ where
                 Event::Heartbeat,
                 ExecStats::new(current_time(), *state.executions()),
             ),
-        );
-
-        Ok(())
+        )
     }
 }
 
@@ -256,6 +254,7 @@ where
     }
 }
 
+#[cfg(unix)]
 /// Provides a `builder` which can be used to build a [`SimpleRestartingEventManager`].
 ///
 /// The [`SimpleRestartingEventManager`] is a combination of a
@@ -269,6 +268,7 @@ pub struct LibFuzzerRestartingEventManager<I, MT, S, SHM, SP> {
     staterestorer: StateRestorer<SHM, SP>,
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> EventFirer<I, S> for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     I: Debug,
@@ -284,6 +284,7 @@ where
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> EventRestarter<S> for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     SHM: ShMem,
@@ -305,6 +306,7 @@ where
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> SendExiting for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     SHM: ShMem,
@@ -320,12 +322,14 @@ where
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> AwaitRestartSafe for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP> {
     /// Block until we are safe to exit, usually called inside `on_restart`.
     #[inline]
     fn await_restart_safe(&mut self) {}
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> EventReceiver<I, S> for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     I: Debug,
@@ -347,6 +351,7 @@ where
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> ProgressReporter<S> for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     I: Debug,
@@ -355,23 +360,42 @@ where
 {
     fn maybe_report_progress(
         &mut self,
-        _state: &mut S,
+        state: &mut S,
         _monitor_timeout: Duration,
     ) -> Result<(), Error> {
-        Ok(())
+        // LibFuzzer criteria: execs is power of two and at least 2 seconds
+        // since startup (tries to avoid pulse during corpus loading)
+        if *state.executions() & (*state.executions() - 1) == 0
+            && current_time()
+                .checked_sub(self.client_stats_manager.start_time())
+                .unwrap_or_default()
+                > Duration::from_secs(2)
+        {
+            self.report_progress(state)
+        } else {
+            Ok(())
+        }
     }
 
     fn report_progress(&mut self, _state: &mut S) -> Result<(), Error> {
-        Ok(())
+        self.fire(
+            state,
+            EventWithStats::new(
+                Event::Heartbeat,
+                ExecStats::new(current_time(), *state.executions()),
+            ),
+        )
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> HasEventManagerId for LibFuzzerRestartingEventManager<I, MT, S, SHM, SP> {
     fn mgr_id(&self) -> EventManagerId {
         self.inner.mgr_id()
     }
 }
 
+#[cfg(unix)]
 impl<I, MT, S, SHM, SP> LibFuzzerRestartingEventManager<I, MT, S, SHM, SP>
 where
     I: Debug,
