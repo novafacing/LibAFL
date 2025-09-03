@@ -19,13 +19,13 @@ libafl_libfuzzer:
 harness: libafl_libfuzzer
     copy ..\..\..\crates\libafl_libfuzzer_runtime\libFuzzer.lib  .
     cl /c /O2 /EHsc /std:c++17 /MDd /fsanitize-coverage=inline-8bit-counters /fsanitize-coverage=edge /fsanitize-coverage=trace-cmp /fsanitize-coverage=trace-div /Fo:harness.obj harness.cc
-    link harness.obj libFuzzer.lib sancov.lib /OUT:libafl_libfuzzer_windows.exe
+    link harness.obj libFuzzer.lib sancov.lib /OUT:{{FUZZER_NAME_WIN}}
 
 [linux]
 [macos]
 harness: libafl_libfuzzer
     cp ../../../crates/libafl_libfuzzer_runtime/libFuzzer.a  .
-    clang++ -g -O2 -std=c++17 -fsanitize=fuzzer-no-link,address,undefined harness.cc libFuzzer.a -o libafl_libfuzzer
+    clang++ -g -O2 -std=c++17 -fsanitize=fuzzer-no-link,address,undefined harness.cc libFuzzer.a -o {{FUZZER_NAME}}
 
 [windows]
 run: harness
