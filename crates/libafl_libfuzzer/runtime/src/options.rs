@@ -4,10 +4,11 @@ use std::{path::PathBuf, time::Duration};
 use libafl::mutators::Tokens;
 use serde::{Deserialize, Serialize};
 
-use crate::options::RawOption::{Directory, Flag};
+use crate::options::RawOption::{Directory, File, Flag};
 
 enum RawOption<'a> {
     Directory(&'a str),
+    File(&'a str),
     Flag { name: &'a str, value: &'a str },
 }
 
@@ -21,8 +22,12 @@ fn parse_option(arg: &str) -> Option<RawOption<'_>> {
             eprintln!("warning: flag {arg} provided without a value; did you mean `{arg}=1'?");
             None
         }
-    } else {
+    } else if PathBuf::from(arg).is_file() {
+        Some(File(arg))
+    } else if PathBuf::from(arg).is_absolute() || arg.contains(std::path::MAIN_SEPARATOR) {
         Some(Directory(arg))
+    } else {
+        None
     }
 }
 
@@ -113,6 +118,7 @@ pub struct LibfuzzerOptions {
     forks: Option<usize>,
     dict: Option<Tokens>,
     dirs: Vec<PathBuf>,
+    files: Vec<PathBuf>,
     ignore_crashes: bool,
     ignore_timeouts: bool,
     ignore_ooms: bool,
@@ -125,6 +131,7 @@ pub struct LibfuzzerOptions {
     runs: usize,
     #[allow(unused)]
     close_fd_mask: u8,
+    create_missing_dirs: bool,
     unknown: Vec<String>,
 }
 
@@ -183,6 +190,10 @@ impl LibfuzzerOptions {
         self.dict.as_ref()
     }
 
+    pub fn files(&self) -> &[PathBuf] {
+        &self.files
+    }
+
     pub fn dirs(&self) -> &[PathBuf] {
         &self.dirs
     }
@@ -232,6 +243,10 @@ impl LibfuzzerOptions {
         self.close_fd_mask
     }
 
+    pub fn create_missing_dirs(&self) -> bool {
+        self.create_missing_dirs
+    }
+
     pub fn unknown(&self) -> &[String] {
         &self.unknown
     }
@@ -249,6 +264,7 @@ struct LibfuzzerOptionsBuilder<'a> {
     forks: Option<usize>,
     dict: Option<&'a str>,
     dirs: Vec<&'a str>,
+    files: Vec<&'a str>,
     ignore_crashes: Option<bool>,
     ignore_timeouts: Option<bool>,
     ignore_ooms: Option<bool>,
@@ -261,6 +277,7 @@ struct LibfuzzerOptionsBuilder<'a> {
     tui: bool,
     runs: usize,
     close_fd_mask: u8,
+    create_missing_dirs: bool,
     unknown: Vec<&'a str>,
 }
 
@@ -281,6 +298,9 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                 match option {
                     Directory(dir) => {
                         self.dirs.push(dir);
+                    }
+                    File(file) => {
+                        self.files.push(file);
                     }
                     Flag { name, value } => match name {
                         "merge" => {
@@ -405,6 +425,9 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                             );
                             std::process::exit(0);
                         }
+                        "create_missing_dirs" => {
+                            self.create_missing_dirs = parse_or_bail!(name, value, u64) > 0;
+                        }
                         _ => {
                             self.unknown.push(arg);
                         }
@@ -434,6 +457,7 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                 Tokens::from_file(path).expect("Couldn't load tokens from specified tokens file")
             }),
             dirs: self.dirs.into_iter().map(PathBuf::from).collect(),
+            files: self.files.into_iter().map(PathBuf::from).collect(),
             ignore_crashes: self.ignore_crashes.unwrap_or_default(),
             ignore_timeouts: self.ignore_timeouts.unwrap_or_default(),
             ignore_ooms: self.ignore_ooms.unwrap_or_default(),
@@ -451,6 +475,7 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
             tui: self.tui,
             runs: self.runs,
             close_fd_mask: self.close_fd_mask,
+            create_missing_dirs: self.create_missing_dirs,
             unknown: self.unknown.into_iter().map(ToString::to_string).collect(),
         }
     }
