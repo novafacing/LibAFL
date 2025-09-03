@@ -1,7 +1,7 @@
 import "../../../just/libafl.just"
 
-FUZZER_NAME     := "libafl_libfuzzer_windows"
-FUZZER_NAME_WIN := "libafl_libfuzzer_windows.exe"
+FUZZER_NAME     := "libafl_libfuzzer_test"
+FUZZER_NAME_WIN := "libafl_libfuzzer_test_windows.exe"
 
 set windows-shell := ['cmd.exe', '/c']
 set unstable
@@ -10,16 +10,33 @@ set unstable
 libafl_libfuzzer:
     powershell -File ..\..\..\crates\libafl_libfuzzer_runtime\build.ps1
 
+[linux]
+[macos]
+libafl_libfuzzer:
+    ../../../crates/libafl_libfuzzer_runtime/build.sh
+
 [windows]
 harness: libafl_libfuzzer
     copy ..\..\..\crates\libafl_libfuzzer_runtime\libFuzzer.lib  .
     cl /c /O2 /EHsc /std:c++17 /MDd /fsanitize-coverage=inline-8bit-counters /fsanitize-coverage=edge /fsanitize-coverage=trace-cmp /fsanitize-coverage=trace-div /Fo:harness.obj harness.cc
     link harness.obj libFuzzer.lib sancov.lib /OUT:libafl_libfuzzer_windows.exe
 
+[linux]
+[macos]
+harness: libafl_libfuzzer
+    cp ../../../crates/libafl_libfuzzer_runtime/libFuzzer.a  .
+    clang++ -g -O2 -std=c++17 -fsanitize=fuzzer-no-link,address,undefined harness.cc libFuzzer.a -o libafl_libfuzzer
+
 [windows]
 run: harness
     if not exist corpus mkdir corpus
     {{FUZZER_NAME_WIN}} -use_value_profile=1 corpus
+
+[linux]
+[macos]
+run: harness
+    if [ ! -d corpus ]; then mkdir corpus; fi
+    ./{{FUZZER_NAME}} -use_value_profile=1 corpus
 
 [windows]
 [script("cmd.exe", "/c")]
@@ -28,3 +45,11 @@ test: harness
     mkdir corpus
     {{FUZZER_NAME_WIN}} -use_value_profile=1 -runs=30000 corpus
     dir /a-d corpus && (echo Files exist) || (exit /b 1337)
+
+[linux]
+[macos]
+test: harness
+    if [ -d corpus ]; then rm -rf corpus; fi
+    mkdir corpus
+    ./{{FUZZER_NAME}} -use_value_profile=1 -runs=30000 corpus
+    [ "$(ls -A corpus)" ] && echo "Files exist" || exit 1337
