@@ -24,10 +24,8 @@ fn parse_option(arg: &str) -> Option<RawOption<'_>> {
         }
     } else if PathBuf::from(arg).is_file() {
         Some(File(arg))
-    } else if PathBuf::from(arg).is_absolute() || arg.contains(std::path::MAIN_SEPARATOR) {
-        Some(Directory(arg))
     } else {
-        None
+        Some(Directory(arg))
     }
 }
 
@@ -444,10 +442,21 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
         LibfuzzerOptions {
             fuzzer_name,
             mode: self.mode.unwrap_or(LibfuzzerMode::Fuzz),
-            artifact_prefix: self
-                .artifact_prefix
-                .map(ArtifactPrefix::new)
-                .unwrap_or_default(),
+            artifact_prefix: {
+                let artifact_prefix = self
+                    .artifact_prefix
+                    .map(ArtifactPrefix::new)
+                    .unwrap_or_default();
+                if self.create_missing_dirs && !artifact_prefix.dir().exists() {
+                    std::fs::create_dir_all(artifact_prefix.dir()).unwrap_or_else(|_| {
+                        panic!(
+                            "Could not create artifact prefix directory {:?}!",
+                            artifact_prefix.dir()
+                        )
+                    });
+                }
+                artifact_prefix
+            },
             timeout: self.timeout.unwrap_or(Duration::from_secs(1200)),
             grimoire: self.grimoire,
             use_value_profile: self.use_value_profile.unwrap_or(false),
@@ -456,7 +465,19 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
             dict: self.dict.map(|path| {
                 Tokens::from_file(path).expect("Couldn't load tokens from specified tokens file")
             }),
-            dirs: self.dirs.into_iter().map(PathBuf::from).collect(),
+            dirs: {
+                let dirs = self.dirs.into_iter().map(PathBuf::from).collect();
+                if self.create_missing_dirs {
+                    for dir in &dirs {
+                        if !dir.exists() {
+                            std::fs::create_dir_all(dir)
+                                .unwrap_or_else(|_| panic!("Could not create directory {dir:?}!"));
+                        }
+                    }
+
+                }
+                dirs
+            },
             files: self.files.into_iter().map(PathBuf::from).collect(),
             ignore_crashes: self.ignore_crashes.unwrap_or_default(),
             ignore_timeouts: self.ignore_timeouts.unwrap_or_default(),

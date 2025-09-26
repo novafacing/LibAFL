@@ -495,10 +495,6 @@ macro_rules! fuzz_with {
                             1 << 10,
                         )
                         .expect("Failed to generate the initial corpus");
-                    println!(
-                        "We imported {} inputs from the generator.",
-                        state.corpus().count()
-                    );
                 }
             }
 

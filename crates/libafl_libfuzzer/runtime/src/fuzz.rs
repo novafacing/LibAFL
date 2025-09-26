@@ -33,10 +33,12 @@ use libafl_bolts::{
 use crate::{
     feedbacks::LibfuzzerCrashCauseMetadata,
     fuzz_with,
-    manager::{LibFuzzerEventManager, LibFuzzerRestartingEventManager},
+    manager::LibFuzzerEventManager,
     monitor::LibFuzzerMonitor,
     options::LibfuzzerOptions,
 };
+#[cfg(unix)]
+use crate::manager::LibFuzzerRestartingEventManager;
 
 #[cfg(unix)]
 fn destroy_output_fds(options: &LibfuzzerOptions) {
