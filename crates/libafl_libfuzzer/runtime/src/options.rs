@@ -12,7 +12,7 @@ enum RawOption<'a> {
     Flag { name: &'a str, value: &'a str },
 }
 
-fn parse_option(arg: &str) -> Option<RawOption> {
+fn parse_option(arg: &str) -> Option<RawOption<'_>> {
     if arg.starts_with("--") {
         None
     } else if arg.starts_with('-') {
@@ -345,7 +345,11 @@ impl<'a> LibfuzzerOptionsBuilder<'a> {
                         #[cfg(not(windows))]
                         "fork" | "jobs" => {
                             self.forks = Some(parse_or_bail!(name, value, usize));
+<<<<<<< HEAD
                             eprintln!("Running {} workers", self.forks);
+=======
+                            eprintln!("Running {} workers", self.forks.unwrap());
+>>>>>>> 920d35f3d112e76ec6d314337bf2c6fb0a1df774
                         }
                         "ignore_crashes" => {
                             self.ignore_crashes = Some(parse_or_bail!(name, value, u64) > 0);

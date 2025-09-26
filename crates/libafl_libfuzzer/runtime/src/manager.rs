@@ -367,7 +367,7 @@ where
         // since startup (tries to avoid pulse during corpus loading)
         if *state.executions() & (*state.executions() - 1) == 0
             && current_time()
-                .checked_sub(self.client_stats_manager.start_time())
+                .checked_sub(self.inner.client_stats_manager.start_time())
                 .unwrap_or_default()
                 > Duration::from_secs(2)
         {
@@ -377,7 +377,7 @@ where
         }
     }
 
-    fn report_progress(&mut self, _state: &mut S) -> Result<(), Error> {
+    fn report_progress(&mut self, state: &mut S) -> Result<(), Error> {
         self.fire(
             state,
             EventWithStats::new(
