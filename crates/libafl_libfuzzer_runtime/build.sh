@@ -8,9 +8,6 @@ cd "${SCRIPT_DIR}" || exit 1
 
 #!/bin/bash
 
-<<<<<<< HEAD
-if ! cargo +nightly --version >& /dev/null; then
-=======
 # Default values
 profile="release"
 toolchain="nightly"
@@ -81,18 +78,13 @@ while true; do
 done
 
 if ! cargo +$toolchain --version >& /dev/null; then
->>>>>>> 920d35f3d112e76ec6d314337bf2c6fb0a1df774
   echo -e "You must install a recent Rust to build the libafl_libfuzzer runtime!"
   exit 1
 fi
 
-<<<<<<< HEAD
-cargo +nightly build --profile "$profile"
-=======
 export RUSTFLAGS="${RUSTFLAGS} ${rustcargs}"
 export CFLAGS="${CFLAGS} ${ccompilerflags}"
 cargo +$toolchain build --profile "$profile" ${cargoargs}
->>>>>>> 920d35f3d112e76ec6d314337bf2c6fb0a1df774
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   # MacOS and iOS
@@ -101,11 +93,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     -o libafl_libfuzzer_runtime.dylib
 else
   # Linux and *BSD
-<<<<<<< HEAD
-  RUSTC_BIN="$(cargo +nightly rustc -Zunstable-options --print target-libdir)/../bin"
-=======
   RUSTC_BIN="$(cargo +$toolchain rustc -Zunstable-options --print target-libdir)/../bin"
->>>>>>> 920d35f3d112e76ec6d314337bf2c6fb0a1df774
   RUST_LLD="${RUSTC_BIN}/rust-lld"
   RUST_AR="${RUSTC_BIN}/llvm-ar"
 
