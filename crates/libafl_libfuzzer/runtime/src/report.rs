@@ -9,6 +9,7 @@ use libafl::{
     stages::StagesTuple,
     state::{HasCurrentStageId, HasExecutions, HasLastReportTime, Stoppable},
 };
+use libafl_bolts::HasLen;
 
 use crate::{fuzz_with, options::LibfuzzerOptions};
 

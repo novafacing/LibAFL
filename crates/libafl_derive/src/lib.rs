@@ -175,6 +175,7 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
             .to_compile_error()
             .into();
     };
+
     let fields = match ds.fields {
         Named(f) => f.named,
         _ => {
@@ -185,13 +186,51 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
     };
 
     // Token accumulators (avoid Vec<FieldInfo>)
-    let mut let_inits_ts = proc_macro2::TokenStream::new();
-    let mut match_arms_ts = proc_macro2::TokenStream::new();
-    let mut build_fields_ts = proc_macro2::TokenStream::new();
+    let mut let_inits = proc_macro2::TokenStream::new();
+    let mut match_arms = proc_macro2::TokenStream::new();
+    let mut build_fields = proc_macro2::TokenStream::new();
+    let mut default_values = proc_macro2::TokenStream::new();
 
     // Collector (trailing Vec<String>)
     let mut collector_ident: Option<proc_macro2::Ident> = None;
     let mut seen_collector = false; // once true, no further fields allowed
+
+    // A constant containing all the field idents as strings
+    let field_names = fields.iter().map(|f| {
+        let ident = f.ident.as_ref().unwrap();
+        let name = ident.to_string();
+        quote! { #name }
+    });
+    let field_names_array = quote! {
+        const FIELD_NAMES: &[&str] = &[#(#field_names),*];
+    };
+
+    let defaults = fields.iter().map(|f| {
+        let Some(libfuzzer_parse_attr) = f
+            .attrs
+            .iter()
+            .find(|a| a.path().is_ident("libfuzzer_parse"))
+        else {
+            return None;
+        };
+        let mut default_val = None;
+        libfuzzer_parse_attr
+            .parse_nested_meta(|m| {
+                default_val = m
+                    .path
+                    .is_ident("default")
+                    .then(|| {
+                        let Ok(lit) = m.value() else {
+                            return None;
+                        };
+                        let expr: Expr = lit.parse().unwrap();
+                        Some(quote! { stringify!(#expr) })
+                    })
+                    .flatten();
+                Ok(())
+            })
+            .map(move |_| default_val)
+    });
 
     for f in fields {
         let ident = f.ident.unwrap();
@@ -239,9 +278,9 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
             collector_ident = Some(var_ident.clone());
             seen_collector = true; // any further field triggers error
             // init collector
-            let_inits_ts.extend(quote! { let mut #var_ident: Vec<String> = Vec::new(); });
+            let_inits.extend(quote! { let mut #var_ident: Vec<String> = Vec::new(); });
             // build struct field
-            build_fields_ts.extend(quote! { #ident: #var_ident, });
+            build_fields.extend(quote! { #ident: #var_ident, });
             continue;
         }
 
@@ -253,14 +292,15 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
 
         let (inner_ty, is_option) = extract_option_inner(&f.ty);
 
-        // Parse attributes (currently only default)
+        // Parse attributes (default and map)
         let mut default_tok = None;
+        let mut map_tok = None;
         for attr in f
             .attrs
             .iter()
             .filter(|a| a.path().is_ident("libfuzzer_parse"))
         {
-            parse_attr(attr, &mut default_tok);
+            parse_attr(attr, &mut default_tok, &mut map_tok);
         }
 
         let required = !is_option && default_tok.is_none();
@@ -271,29 +311,34 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
         tmp_name_t.push_str("_tmp");
         let var_ident = syn::Ident::new(&tmp_name_t, ident.span());
         if let Some(def) = &default_tok {
-            let_inits_ts.extend(quote! { let mut #var_ident : Option<#inner_ty> = Some(#def); });
+            let_inits.extend(quote! { let mut #var_ident : Option<#inner_ty> = Some(#def); });
         } else {
-            let_inits_ts.extend(quote! { let mut #var_ident : Option<#inner_ty> = None; });
+            let_inits.extend(quote! { let mut #var_ident : Option<#inner_ty> = None; });
         }
 
         let lit = syn::LitStr::new(&ident.to_string(), ident.span());
-        if is_string {
-            match_arms_ts.extend(quote! { #lit => { #var_ident = Some(value.to_string()); } });
+        if let Some(map_expr) = &map_tok {
+            match_arms.extend(quote! { #lit => { #var_ident = Some((#map_expr)(value)); } });
+        } else if is_string {
+            match_arms.extend(quote! { #lit => { #var_ident = Some(value.to_string()); } });
         } else {
-            match_arms_ts.extend(quote! { #lit => { #var_ident = Some(value.parse::<#inner_ty>().unwrap_or_else(|_| panic!("Invalid value for -{}: {}", #lit, value))); } });
+            match_arms.extend(quote! { #lit => { #var_ident = Some(value.parse::<#inner_ty>().unwrap_or_else(|_| panic!("Invalid value for -{}: {}", #lit, value))); } });
         }
 
         if is_option {
-            build_fields_ts.extend(quote! { #ident: #var_ident, });
+            build_fields.extend(quote! { #ident: #var_ident, });
         } else if required {
-            build_fields_ts.extend(quote! { #ident: #var_ident.expect(concat!("Required flag -", stringify!(#ident), " not provided")), });
+            build_fields.extend(quote! { #ident: #var_ident.expect(concat!("Required flag -", stringify!(#ident), " not provided")), });
         } else {
-            build_fields_ts.extend(quote! { #ident: #var_ident.expect("Internal error: value missing (should have default or provided)"), });
+            build_fields.extend(quote! { #ident: #var_ident.expect("Internal error: value missing (should have default or provided)"), });
         }
     }
 
     let unknown_arm = if let Some(ref coll) = collector_ident {
-        quote! { _ => { #coll.push(original.to_string()); } }
+        quote! { _ => {
+            eprintln!("\n\nWARNING: unrecognized flag '{}'; use -help=1 to list all flags\n", original);
+            #coll.push(original.to_string());
+        }}
     } else {
         quote! { _ => { } }
     };
@@ -311,14 +356,23 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
                 I: IntoIterator<Item = T>,
                 T: AsRef<str>
             {
-                #let_inits_ts
+                #let_inits
+                #field_names_array
+                let mut printed_warning = false;
                 for arg in args {
                     let original = arg.as_ref();
-                    if original.starts_with('-') {
+                    if !printed_warning && original.starts_with("--") {
+                        eprintln!("INFO: libFuzzer ignores flags that start with '--'");
+                        printed_warning = true;
+                    }
+                    if original.starts_with("--") && FIELD_NAMES.contains(&&original[2..]) {
+                        eprintln!("WARNING: did you mean '{}' (single dash)?", &original[1..]);
+                    }
+                    if original.starts_with('-') && !original.starts_with("--"){
                         let body = &original[1..];
                         if let Some((key, value)) = body.split_once('=') {
                             match key {
-                                #match_arms_ts
+                                #match_arms
                                 #unknown_arm
                             }
                             continue;
@@ -333,7 +387,12 @@ pub fn derive_libfuzzer_parse(input: TokenStream) -> TokenStream {
                         continue;
                     }
                 }
-                Self { #build_fields_ts }
+                Self { #build_fields }
+            }
+
+            pub fn parse_libfuzzer_help() {
+
+
             }
         }
     };
@@ -357,12 +416,21 @@ fn extract_option_inner(ty: &Type) -> (Type, bool) {
     (ty.clone(), false)
 }
 
-fn parse_attr(attr: &Attribute, default_out: &mut Option<proc_macro2::TokenStream>) {
+fn parse_attr(
+    attr: &Attribute,
+    default_out: &mut Option<proc_macro2::TokenStream>,
+    map_out: &mut Option<proc_macro2::TokenStream>,
+) {
     let _ = attr.parse_nested_meta(|meta| {
         if meta.path.is_ident("default") {
             if let Ok(lit) = meta.value() {
                 let expr: Expr = lit.parse().unwrap();
                 *default_out = Some(quote! { #expr });
+            }
+        } else if meta.path.is_ident("map") {
+            if let Ok(lit) = meta.value() {
+                let expr: Expr = lit.parse().unwrap();
+                *map_out = Some(quote! { #expr });
             }
         }
         Ok(())

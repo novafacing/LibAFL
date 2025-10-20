@@ -479,7 +479,6 @@ macro_rules! fuzz_with {
                         .unwrap_or_else(|e| {
                             panic!("Failed to load initial corpus at {:?}: {}", $options.dirs(), e)
                         });
-                    println!("We imported {} inputs from disk.", state.corpus().count());
                 }
                 if state.corpus().count() < 1 {
                     // Generator of bytearrays of max size 64
@@ -496,6 +495,15 @@ macro_rules! fuzz_with {
                         )
                         .expect("Failed to generate the initial corpus");
                 }
+                let input_sizes = state.corpus().ids().filter(|id| state.corpus().get(*id).unwrap().borrow().input().is_some()).map(|id| state.corpus().get(id).unwrap().borrow().input().as_ref().unwrap().len()).collect::<Vec<_>>();
+                eprintln!("INFO: seed corpus: files: {} min: {} max: {} total: {} rss: {}",
+                    state.corpus().count(),
+                    input_sizes.iter().min().unwrap_or(&0),
+                    input_sizes.iter().max().unwrap_or(&0),
+                    input_sizes.iter().sum::<usize>(),
+                    // TODO: Add actual RSS here
+                    0
+                );
             }
 
             let mut executor = ShadowExecutor::new(executor, tuple_list!(cmplog_observer));

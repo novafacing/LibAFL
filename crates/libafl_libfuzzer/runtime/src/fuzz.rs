@@ -24,21 +24,19 @@ use libafl::{
     events::{EventConfig, launcher::Launcher},
     monitors::Monitor,
 };
+use libafl_bolts::HasLen;
 #[cfg(unix)]
 use libafl_bolts::{
     core_affinity::Cores,
     shmem::{ShMemProvider, StdShMemProvider},
 };
 
-use crate::{
-    feedbacks::LibfuzzerCrashCauseMetadata,
-    fuzz_with,
-    manager::LibFuzzerEventManager,
-    monitor::LibFuzzerMonitor,
-    options::LibfuzzerOptions,
-};
 #[cfg(unix)]
 use crate::manager::LibFuzzerRestartingEventManager;
+use crate::{
+    feedbacks::LibfuzzerCrashCauseMetadata, fuzz_with, manager::LibFuzzerEventManager,
+    monitor::LibFuzzerMonitor, options::LibfuzzerOptions,
+};
 
 #[cfg(unix)]
 fn destroy_output_fds(options: &LibfuzzerOptions) {

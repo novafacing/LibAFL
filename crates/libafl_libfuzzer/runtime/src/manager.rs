@@ -151,7 +151,8 @@ where
     ) -> Result<(), Error> {
         // LibFuzzer criteria: execs is power of two and at least 2 seconds
         // since startup (tries to avoid pulse during corpus loading)
-        if *state.executions() & (*state.executions() - 1) == 0
+        if *state.executions() > 0
+            && *state.executions() & (*state.executions() - 1) == 0
             && current_time()
                 .checked_sub(self.client_stats_manager.start_time())
                 .unwrap_or_default()
